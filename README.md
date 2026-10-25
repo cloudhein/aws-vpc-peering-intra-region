@@ -12,6 +12,7 @@ The lab combines **explicit routing**, **controlled inbound and outbound traffic
 - [Security Controls](#security-controls)
 - [Connectivity Verification](#connectivity-verification)
 - [Why Refactor Terraform State?](#why-refactor-terraform-state)
+- [Remote Execution Workflow](#remote-execution-workflow)
 - [Workspace Layout and Output Sharing](#workspace-layout-and-output-sharing)
 - [Workspace Orchestration](#coordinating-creation-and-destruction-across-multiple-dependent-workspaces-with-tfe_workspace_run)
 - [Running the Lab](#running-the-lab)
@@ -210,7 +211,19 @@ The operational problem is **coupling**: a routine compute change should not req
 
 The goal is to group logically related resources by lifecycle and volatility, not to create a state per resource. See [HashiCorp workspace best practices](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/best-practices#group-by-volatility).
 
+## Remote Execution Workflow
+
+The seven infrastructure workspaces use **remote execution in HCP Terraform**. We can start `terraform plan` and `terraform apply` from the local CLI, but Terraform uploads the configuration and runs the plan/apply on HCP-managed Linux workers. Each target uses its workspace variables and AWS credentials to manage AWS resources; HCP stores and versions its state. See the [CLI-driven remote workflow](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/run/cli).
+
+![Remote execution workflow showing the eight HCP workspaces, workspace state and variables, local CLI, and AWS](assets/remote-execution-workflow.png)
+
+The diagram shows the overall workspace and state arrangement. In the final POC, **`workspace-runner-ws` executes locally** to coordinate the seven remote targets through the HCP API. Its state also remains in HCP Terraform. The reason for this controller exception is explained under [Why the Controller Runs Locally](#why-the-controller-runs-locally).
+
 ## Workspace Layout and Output Sharing
+
+### Eight Workspaces, Eight Separate States
+
+This POC is divided into **eight HCP Terraform workspaces**: frontend and backend network, security, and compute workspaces; one peering workspace; and one controller workspace. Each workspace stores and manages its own state in HCP Terraform for its related resources or orchestration configuration.
 
 ```text
 aws-vpc-peering-intra-region/
@@ -236,7 +249,15 @@ aws-vpc-peering-intra-region/
 
 The different local backend directory name is intentional: its `cloud` block binds `be-network-ns/` to `be-network-ws`.
 
-The repository shares data with `tfe_outputs`:
+![All eight POC workspaces in HCP Terraform](assets/all-workspaces.png)
+
+*POC workspace overview: the seven infrastructure workspaces show Applied. The controller's Errored run is shown in this snapshot; the result after switching to Local is documented below.*
+
+### Restricted State and Output Sharing
+
+Remote state sharing is restricted to **only the workspaces that need the outputs**, using HCP's **Share with specific workspaces** setting. Network outputs are needed by the corresponding security and compute workspaces and by peering; security outputs are needed by the corresponding compute workspace and by peering. See [HCP remote state sharing](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/settings#remote-state-sharing).
+
+The repository shares data with `tfe_outputs`; the identity used by this provider must also have permission to read the required source workspace outputs:
 
 ```hcl
 data "tfe_outputs" "fe_network_source_workspace" {
@@ -324,6 +345,22 @@ HCP's published Free-plan limit is **one concurrent remote run**. A remote waiti
 
 The controller uses HCP API credentials. Each AWS-managing target uses its own AWS credentials. Local controller execution does not move AWS provisioning to the laptop.
 
+#### POC Results
+
+The initial remote-controller attempt left the backend network run at **Plan queued / Waiting for resources**:
+
+![Backend network run queued while waiting for remote execution resources](assets/be-network-ws-error.png)
+
+After switching **only `workspace-runner-ws` to Local**, the target runs could proceed remotely. The controller then saved a new state version in HCP Terraform:
+
+![Controller state history showing a new state version saved after local execution](assets/workspace-runner-ws-successful-run.png)
+
+The controller's state contains the workspace lookups and `tfe_workspace_run` resources that coordinate the targets:
+
+![Workspace runner state listing workspace data sources and workspace-run resources](assets/workspace-runner-ws.png)
+
+Local execution writes the controller state to HCP without creating a new hosted controller run. Its earlier Errored run can therefore remain visible in the workspace overview even after the local operation succeeds. See [HCP state storage with Local execution](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/state#state-usage-in-terraform-runs).
+
 ## Running the Lab
 
 1. Create or verify the eight HCP workspace names and the organization configured in the `cloud` blocks.
@@ -388,4 +425,6 @@ Removing, tainting, or replacing a controller resource with a `destroy` block ca
 - [tfe_workspace_run](https://registry.terraform.io/providers/hashicorp/tfe/latest/docs/resources/workspace_run)
 - [The Multispace pattern](https://www.hashicorp.com/en/blog/terraform-apply-as-code-the-multispace-pattern)
 - [HCP Terraform concurrency limits](https://developer.hashicorp.com/terraform/cloud-docs/overview#concurrency-limits)
-
+- [CLI-driven remote execution workflow](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/run/cli)
+- [HCP remote state sharing](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/settings#remote-state-sharing)
+- [HCP workspace state storage](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/state)
