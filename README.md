@@ -227,7 +227,7 @@ This POC is divided into **eight HCP Terraform workspaces**: frontend and backen
 
 ```text
 aws-vpc-peering-intra-region/
-├── be-network-ns/                 # HCP workspace: be-network-ws
+├── be-network-ws/                 
 ├── be-security-ws/
 ├── be-compute-ws/
 ├── fe-network-ws/
@@ -246,8 +246,6 @@ aws-vpc-peering-intra-region/
 | Frontend/backend compute | Instances, SSH key pairs, public-instance EIPs | Consumes network and security outputs |
 | Peering | Peering connection, four routes, cross-VPC rules | Consumes network and security outputs from both VPCs |
 | Workspace runner | Seven workspace-run controller resources | Looks up existing HCP workspace IDs and coordinates their runs |
-
-The different local backend directory name is intentional: its `cloud` block binds `be-network-ns/` to `be-network-ws`.
 
 ![All eight POC workspaces in HCP Terraform](assets/all-workspaces.png)
 
